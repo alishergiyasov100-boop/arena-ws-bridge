@@ -1052,6 +1052,78 @@
                         console.log("[API Bridge] ✅ ID capture mode activated. Please trigger a 'Retry' action on the page.");
                         isCaptureModeActive = true;
                         document.title = "🎯 " + document.title;
+                    } else if (message.command === 'spawn_battle') {
+                        const modelAId = message.modelAId;
+                        const modelBId = message.modelBId;
+                        if (!modelAId || !modelBId) {
+                            bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE missing modelIds', 'text/plain');
+                            return;
+                        }
+                        try {
+                            const sessionId = uuidv7();
+                            const userMsgId = uuidv7();
+                            const modelAMsgId = uuidv7();
+                            const modelBMsgId = uuidv7();
+                            const recaptchaV3 = await getFreshRecaptchaToken();
+                            const battleBody = {
+                                id: sessionId,
+                                mode: "battle",
+                                modality: "chat",
+                                modelAId, modelBId,
+                                userMessageId: userMsgId,
+                                modelAMessageId: modelAMsgId,
+                                modelBMessageId: modelBMsgId,
+                                userMessage: { content: "hi", experimental_attachments: [], metadata: {} },
+                                recaptchaV3Token: recaptchaV3,
+                                messages: [],
+                            };
+                            bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE start sid='+sessionId.substring(0,8), 'text/plain');
+                            window.isApiBridgeRequest = true;
+                            const r1 = await fetch('/nextjs-api/stream/create-evaluation', {
+                                method: 'POST',
+                                headers: {'Content-Type':'text/plain;charset=UTF-8', 'Accept':'*/*'},
+                                body: JSON.stringify(battleBody),
+                                credentials: 'include',
+                            });
+                            window.isApiBridgeRequest = false;
+                            bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE create=' + r1.status, 'text/plain');
+                            if (!r1.ok) {
+                                const t = await r1.text();
+                                bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE create_err=' + t.substring(0,200), 'text/plain');
+                                return;
+                            }
+                            // Drain stream so arena registers it completed
+                            try {
+                                const rd = r1.body.getReader();
+                                while (true) {
+                                    const { value, done } = await rd.read();
+                                    if (done) break;
+                                }
+                            } catch(e){}
+                            // Skip to direct with modelA
+                            const newModelAMsgId = uuidv7();
+                            const r2 = await fetch('/nextjs-api/stream/skip-direct-battle/' + sessionId, {
+                                method: 'POST',
+                                headers: {'Content-Type':'application/json'},
+                                body: JSON.stringify({
+                                    messageAId: modelAMsgId,
+                                    messageBId: modelBMsgId,
+                                    modelAMessageId: newModelAMsgId,
+                                }),
+                                credentials: 'include',
+                            });
+                            bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE skip=' + r2.status, 'text/plain');
+                            if (r2.ok) {
+                                bridgePost('http://127.0.0.1:5102/update', JSON.stringify({sessionId, messageId: userMsgId, modelName: message.modelName}), 'application/json');
+                                bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE done captured sid='+sessionId.substring(0,8), 'text/plain');
+                            } else {
+                                const t = await r2.text();
+                                bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE skip_err=' + t.substring(0,200), 'text/plain');
+                            }
+                        } catch(e) {
+                            bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE error='+(e.message||e), 'text/plain');
+                        }
+                        return;
                     } else if (message.command === 'rotate_anon') {
                         console.log("[API Bridge] 🔄 Anonymous rotation requested");
                         bridgePost('http://127.0.0.1:5102/debug/log', 'ROTATE_ANON start', 'text/plain');
