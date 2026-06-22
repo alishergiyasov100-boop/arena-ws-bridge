@@ -1114,9 +1114,11 @@
         }
 
         _dbg('mkurl');
-        const apiUrl = `/nextjs-api/stream/create-evaluation`;
-        const evaluationId = uuidv7();
-        _dbg('mkurl_done');
+        // arena.ai forbids 'direct' mode on /create-evaluation for new conversations.
+        // Use /post-to-evaluation/<session_id> which appends to existing conversation.
+        const apiUrl = `/nextjs-api/stream/post-to-evaluation/${session_id}`;
+        const evaluationId = session_id; // reuse existing conversation id
+        _dbg('mkurl_done url='+apiUrl);
 
         const newMessages = [];
         let lastMsgId = null;
@@ -1167,20 +1169,20 @@
         const lastUserMsgId = uuidv7();
         const lastAssistantMsgId = uuidv7();
 
+        const lastAssistantMsgIdB = uuidv7();
         const body = {
             id: evaluationId,
-            mode: "direct",
-            modality: "chat",
             modelAId: target_model_id,
-            modelAMessageId: lastAssistantMsgId,
             userMessageId: lastUserMsgId,
+            modelAMessageId: lastAssistantMsgId,
+            modelBMessageId: lastAssistantMsgIdB,
             userMessage: {
                 content: formattedHistory,
                 experimental_attachments: [],
                 metadata: {},
             },
+            modality: "chat",
             recaptchaV3Token: recaptchaToken,
-            messages: [],
         };
 
         console.log("[API Bridge] Sending to LMArena API");
