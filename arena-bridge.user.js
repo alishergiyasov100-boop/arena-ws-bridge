@@ -13,7 +13,8 @@
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=lmarena.ai
 // @connect      localhost
 // @connect      127.0.0.1
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @grant        GM.xmlHttpRequest
 // @run-at       document-end
 // @downloadURL https://update.greasyfork.org/scripts/565469/Arena%20API%20Bridge%20-%20Standard%20Edition%20v327.user.js
 // @updateURL https://update.greasyfork.org/scripts/565469/Arena%20API%20Bridge%20-%20Standard%20Edition%20v327.meta.js
@@ -23,6 +24,29 @@
     'use strict';
     console.log("[API Bridge] 🚀 INJECTED on", location.href, "ts=", Date.now());
     document.title = "🚀 " + document.title;
+
+    // CSP on arena.ai blocks page-side fetch to 127.0.0.1. Use Tampermonkey's
+    // GM_xmlhttpRequest which runs in the extension context and bypasses CSP.
+    const GMX = (typeof GM_xmlhttpRequest !== 'undefined') ? GM_xmlhttpRequest
+              : (typeof GM !== 'undefined' && GM.xmlHttpRequest) ? GM.xmlHttpRequest.bind(GM)
+              : null;
+    function bridgePost(url, body, contentType) {
+        if (GMX) {
+            try {
+                GMX({
+                    method: 'POST',
+                    url: url,
+                    headers: {'Content-Type': contentType || 'text/plain'},
+                    data: typeof body === 'string' ? body : JSON.stringify(body),
+                    onload: function(){},
+                    onerror: function(){},
+                });
+                return;
+            } catch(e){}
+        }
+        try { fetch(url, {method:'POST', headers:{'Content-Type': contentType || 'text/plain'}, body: typeof body === 'string' ? body : JSON.stringify(body)}).catch(()=>{}); } catch(e){}
+    }
+    window.__bridgePost = bridgePost;
 
     const SERVER_URL = "ws://127.0.0.1:5102/ws";
     let socket;
@@ -805,11 +829,7 @@
             try {
                 const u = String(url || '');
                 if (u && isCaptureModeActive && !u.includes('127.0.0.1')) {
-                    fetch('http://127.0.0.1:5102/debug/log', {
-                        method: 'POST',
-                        headers: {'Content-Type':'text/plain'},
-                        body: 'xhr ' + method + ' ' + u.substring(0, 400),
-                    }).catch(()=>{});
+                    bridgePost('http://127.0.0.1:5102/debug/log', 'xhr ' + method + ' ' + u.substring(0, 400), 'text/plain');
                 }
                 // Try to capture session/message IDs from XHR url too
                 if (isCaptureModeActive && !window.isApiBridgeRequest) {
@@ -819,11 +839,7 @@
                     if (m) {
                         console.log('[API Bridge] 🎯 XHR captured IDs:', m[1], m[2]);
                         isCaptureModeActive = false;
-                        fetch('http://127.0.0.1:5102/update', {
-                            method: 'POST',
-                            headers: {'Content-Type':'application/json'},
-                            body: JSON.stringify({sessionId: m[1], messageId: m[2]}),
-                        }).catch(()=>{});
+                        bridgePost('http://127.0.0.1:5102/update', JSON.stringify({sessionId: m[1], messageId: m[2]}), 'application/json');
                     }
                 }
             } catch(e){}
@@ -977,14 +993,7 @@
             console.log("[API Bridge] ✅ WebSocket connection established.");
             document.title = "✅ " + document.title;
             resetSessionTimer();
-            // ping debug log so we know userscript is alive on main page
-            try {
-                fetch('http://127.0.0.1:5102/debug/log', {
-                    method: 'POST',
-                    headers: {'Content-Type':'text/plain'},
-                    body: 'ALIVE main page: ' + location.href + ' UA=' + navigator.userAgent.substring(0,80),
-                }).catch(()=>{});
-            } catch(e){}
+            bridgePost('http://127.0.0.1:5102/debug/log', 'ALIVE main page: ' + location.href + ' UA=' + navigator.userAgent.substring(0,80), 'text/plain');
         };
 
         socket.onmessage = async (event) => {
@@ -1319,18 +1328,8 @@
                     document.title = document.title.substring(2);
                 }
 
-                fetch('http://127.0.0.1:5102/update', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ sessionId, messageId })
-                })
-                .then(response => {
-                    if (!response.ok) throw new Error(`Server responded with status: ${response.status}`);
-                    console.log(`[API Bridge] ✅ ID update sent successfully. Capture mode auto-disabled.`);
-                })
-                .catch(err => {
-                    console.error('[API Bridge] Error sending ID update:', err.message);
-                });
+                bridgePost('http://127.0.0.1:5102/update', JSON.stringify({ sessionId, messageId }), 'application/json');
+                console.log(`[API Bridge] ✅ ID update sent (via bridgePost). Capture mode auto-disabled.`);
             }
         }
 
@@ -1342,14 +1341,15 @@
     // ============================================
     async function sendPageSource() {
         const htmlContent = document.documentElement.outerHTML;
-
+        console.log("[API Bridge] sending page source via bridgePost, len=" + htmlContent.length);
+        bridgePost('http://127.0.0.1:5102/internal/update_available_models', htmlContent, 'text/html; charset=utf-8');
+        return;
+        // dead code below (kept for diff minimal)
         const endpoints = [
             'http://127.0.0.1:5102/internal/update_available_models',
             'http://127.0.0.1:5102/internal/update_models'
         ];
-
         let success = false;
-
         for (const endpoint of endpoints) {
             try {
                 const response = await fetch(endpoint, {
