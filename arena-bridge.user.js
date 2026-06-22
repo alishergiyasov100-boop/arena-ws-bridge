@@ -1038,6 +1038,7 @@
                 }
 
                 console.log(`[API Bridge] ⬇️ Received chat request ${request_id.substring(0, 8)}.`);
+                bridgePost('http://127.0.0.1:5102/debug/log', 'GOT_REQUEST ' + request_id.substring(0,8) + ' model=' + (payload && payload.target_model_id || '').substring(0,8), 'text/plain');
 
                 if (queueEnabled) {
                     console.log(`[API Bridge] 📥 Queue is ON - adding request to queue`);
