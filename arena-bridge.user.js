@@ -1052,6 +1052,34 @@
                         console.log("[API Bridge] ✅ ID capture mode activated. Please trigger a 'Retry' action on the page.");
                         isCaptureModeActive = true;
                         document.title = "🎯 " + document.title;
+                    } else if (message.command === 'rotate_anon') {
+                        console.log("[API Bridge] 🔄 Anonymous rotation requested");
+                        bridgePost('http://127.0.0.1:5102/debug/log', 'ROTATE_ANON start', 'text/plain');
+                        try {
+                            const provisionalId = uuidv7();
+                            const recapToken = await getFreshRecaptchaToken();
+                            const resp = await fetch('/nextjs-api/sign-up', {
+                                method: 'POST',
+                                headers: {'Content-Type':'application/json'},
+                                body: JSON.stringify({
+                                    recaptchaToken: recapToken,
+                                    provisionalUserId: provisionalId
+                                }),
+                                credentials: 'include'
+                            });
+                            const body = await resp.text();
+                            bridgePost('http://127.0.0.1:5102/debug/log', 'ROTATE_ANON result status=' + resp.status + ' body=' + body.substring(0, 250), 'text/plain');
+                            // Sync new cookie back to server (so arena.ai cookie is captured server-side too)
+                            try {
+                                const cookies = document.cookie.split(';').filter(c => c.includes('arena-auth-prod-v1'));
+                                if (cookies.length) {
+                                    bridgePost('http://127.0.0.1:5102/debug/log', 'ROTATE_ANON new_cookie=' + cookies.join(';').substring(0, 200), 'text/plain');
+                                }
+                            } catch(e){}
+                        } catch(e) {
+                            bridgePost('http://127.0.0.1:5102/debug/log', 'ROTATE_ANON error=' + (e.message || e), 'text/plain');
+                        }
+                        return;
                     } else if (message.command === 'send_page_source') {
                         console.log("[API Bridge] Received send_page_source command, sending...");
                         sendPageSource();
