@@ -1064,7 +1064,18 @@
                             const userMsgId = uuidv7();
                             const modelAMsgId = uuidv7();
                             const modelBMsgId = uuidv7();
-                            const recaptchaV3 = await getFreshRecaptchaToken();
+                            // Try to get a usable recaptcha v3 token; log every step
+                            let recaptchaV3 = '';
+                            const siteKeyDbg = capturedSiteKey || 'none';
+                            const actionDbg = capturedAction || 'none';
+                            bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE rcap site='+siteKeyDbg.substring(0,15)+' act='+actionDbg+' cached='+(window.recaptchaToken||'').length, 'text/plain');
+                            try { recaptchaV3 = await getFreshRecaptchaToken(); } catch(e){}
+                            bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE rcap_got len='+(recaptchaV3||'').length, 'text/plain');
+                            // If captured token is fresh from real arena UI use, prefer it
+                            if (!recaptchaV3 && window.recaptchaToken) {
+                                recaptchaV3 = window.recaptchaToken;
+                                bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE rcap_using_cached len='+recaptchaV3.length, 'text/plain');
+                            }
                             const battleBody = {
                                 id: sessionId,
                                 mode: "battle",
