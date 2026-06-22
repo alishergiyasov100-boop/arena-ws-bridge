@@ -1010,20 +1010,52 @@
         window.__cancelNextCreateEval = true;
 
         try {
-            // 3. Set input value via React-aware setter — NO dispatchEvent (React onInput may sync-freeze)
+            // 3. Focus input — triggers arena's lazy-load of grecaptcha without freezing
+            try { input.focus(); input.dispatchEvent(new FocusEvent('focus', { bubbles: true })); } catch(e){}
+            _d('focused_input');
+            await new Promise(r => setTimeout(r, 500));
+            // Set value via React-aware setter
             try {
                 const proto = input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
                 const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
                 setter.call(input, 'mint');
             } catch(e) { _d('setter_err='+(e.message||e).toString().substring(0,80)); }
-            _d('value_set_no_dispatch');
+            _d('value_set_no_dispatch grecaptcha='+(!!(window.grecaptcha?.execute)));
 
             // 4. Direct-call React onClick handler (no native click → no UI side effects)
+            // After focus, grecaptcha may now be loaded — try direct execute
+            const cap = window.grecaptcha?.enterprise || window.grecaptcha;
+            if (cap?.execute && (capturedSiteKey || foundKey)) {
+                _d('direct_execute available, calling');
+                try {
+                    const k = capturedSiteKey || foundKey;
+                    const tok = await Promise.race([
+                        new Promise((res, rej) => cap.ready(() => cap.execute(k, {action: capturedAction || 'submit'}).then(res, rej))),
+                        new Promise(r => setTimeout(() => r(''), 10000)),
+                    ]);
+                    if (tok && tok.length > 50) {
+                        _d('DIRECT_EXECUTE_OK len='+tok.length);
+                        window.recaptchaToken = tok;
+                        return tok;
+                    }
+                } catch(e) { _d('direct_execute_err='+(e.message||e).toString().substring(0,80)); }
+            }
             _d('value_set, looking for react props');
             const props = findReactPropsOnElement(btn);
             const before = window.recaptchaToken || '';
             _d('props='+(!!props)+' onClick='+(props && typeof props.onClick));
-            if (props && typeof props.onClick === 'function') {
+            // Also try form.onSubmit
+            const form = btn.closest('form') || input.closest('form');
+            const formProps = form ? findReactPropsOnElement(form) : null;
+            _d('form='+(!!form)+' formProps='+(!!formProps)+' onSubmit='+(formProps && typeof formProps.onSubmit));
+            if (formProps && typeof formProps.onSubmit === 'function') {
+                _d('calling form.onSubmit');
+                try {
+                    const fakeEvent = { preventDefault: () => {}, stopPropagation: () => {}, nativeEvent: {}, currentTarget: form, target: form, type: 'submit' };
+                    const r = formProps.onSubmit(fakeEvent);
+                    if (r && typeof r.then === 'function') { try { await Promise.race([r, new Promise(res => setTimeout(res, 5000))]); } catch(e){} }
+                } catch(e) { _d('form_onSubmit_err='+(e.message||e).toString().substring(0,80)); }
+            } else if (props && typeof props.onClick === 'function') {
                 _d('calling react_onClick');
                 try {
                     const fakeEvent = {
