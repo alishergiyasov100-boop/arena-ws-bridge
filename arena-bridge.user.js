@@ -21,6 +21,8 @@
 
 (function () {
     'use strict';
+    console.log("[API Bridge] 🚀 INJECTED on", location.href, "ts=", Date.now());
+    document.title = "🚀 " + document.title;
 
     const SERVER_URL = "ws://localhost:5102/ws";
     let socket;
