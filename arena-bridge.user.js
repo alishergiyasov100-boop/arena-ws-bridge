@@ -1056,6 +1056,23 @@
                         console.log("[API Bridge] 🔄 Anonymous rotation requested");
                         bridgePost('http://127.0.0.1:5102/debug/log', 'ROTATE_ANON start', 'text/plain');
                         try {
+                            // 1. Inspect current cookies for tracking
+                            const before = document.cookie.split(';').map(c => c.trim().split('=')[0]).join(',');
+                            bridgePost('http://127.0.0.1:5102/debug/log', 'ROTATE_ANON cookies_before=' + before.substring(0,300), 'text/plain');
+
+                            // 2. Try to wipe arena cookies (httpOnly we can't touch, but try non-http ones)
+                            const expire = 'expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+                            for (const c of document.cookie.split(';')) {
+                                const name = c.trim().split('=')[0];
+                                if (!name) continue;
+                                document.cookie = `${name}=; ${expire}`;
+                                document.cookie = `${name}=; ${expire}; domain=.arena.ai`;
+                                document.cookie = `${name}=; ${expire}; domain=arena.ai`;
+                            }
+                            const after = document.cookie.split(';').map(c => c.trim().split('=')[0]).join(',');
+                            bridgePost('http://127.0.0.1:5102/debug/log', 'ROTATE_ANON cookies_after=' + after.substring(0,300), 'text/plain');
+
+                            // 3. Try sign-up with fresh provisional UUID
                             const provisionalId = uuidv7();
                             const recapToken = await getFreshRecaptchaToken();
                             const resp = await fetch('/nextjs-api/sign-up', {
@@ -1069,11 +1086,10 @@
                             });
                             const body = await resp.text();
                             bridgePost('http://127.0.0.1:5102/debug/log', 'ROTATE_ANON result status=' + resp.status + ' body=' + body.substring(0, 250), 'text/plain');
-                            // Sync new cookie back to server (so arena.ai cookie is captured server-side too)
                             try {
                                 const cookies = document.cookie.split(';').filter(c => c.includes('arena-auth-prod-v1'));
                                 if (cookies.length) {
-                                    bridgePost('http://127.0.0.1:5102/debug/log', 'ROTATE_ANON new_cookie=' + cookies.join(';').substring(0, 200), 'text/plain');
+                                    bridgePost('http://127.0.0.1:5102/debug/log', 'ROTATE_ANON new_cookie_len=' + cookies.join('').length, 'text/plain');
                                 }
                             } catch(e){}
                         } catch(e) {
