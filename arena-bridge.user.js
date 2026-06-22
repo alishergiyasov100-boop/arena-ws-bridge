@@ -999,14 +999,44 @@
         _d('btn='+(!!btn));
         if (!btn) return '';
 
-        // Set value + fire input event ALL in microtask to keep flow non-blocking
-        try {
-            const proto = HTMLTextAreaElement.prototype;
-            const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
-            setter.call(input, 'mint');
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            _d('input_dispatched');
-        } catch(e){ _d('setter_err='+(e.message||e).toString().substring(0,80)); }
+        // Step 1: native tap on textarea (real OS focus)
+        const ir = input.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const chromeY = (window.outerHeight - window.innerHeight) + (window.screenY || 0);
+        const inpX = Math.round((ir.left + ir.width/2 + (window.screenX||0)) * dpr);
+        const inpY = Math.round((ir.top + ir.height/2 + chromeY) * dpr);
+        _d('tap_input phys=('+inpX+','+inpY+')');
+        // Block real submit BEFORE typing (typing may trigger arena auto-send)
+        ensureNavBlock();
+        window.__preventNavigation = true;
+        window.__cancelNextCreateEval = true;
+        const tokenBefore = window.recaptchaToken || '';
+        await fetch('http://127.0.0.1:5102/admin/native_tap', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({x: inpX, y: inpY})
+        }).catch(()=>{});
+        await new Promise(r => setTimeout(r, 400));
+
+        // Step 2: native type — real OS keystrokes activate React state + mint recaptcha
+        _d('typing');
+        await fetch('http://127.0.0.1:5102/admin/native_type', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({text: 'a'})  // one char enough to activate Send
+        }).catch(()=>{});
+
+        // Poll for recaptcha mint — arena mints when Send becomes enabled
+        _d('poll_after_type');
+        for (let i = 0; i < 80; i++) {
+            await new Promise(r => setTimeout(r, 100));
+            const cur = window.recaptchaToken || '';
+            if (cur && cur !== tokenBefore && cur.length > 50) {
+                _d('TOKEN_FROM_TYPING len='+cur.length);
+                window.__preventNavigation = false;
+                window.__cancelNextCreateEval = false;
+                return cur;
+            }
+        }
+        _d('typing_no_token');
 
         // Get button coordinates with browser-chrome offset
         const r = btn.getBoundingClientRect();
