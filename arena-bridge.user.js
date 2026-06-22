@@ -25,6 +25,44 @@
     console.log("[API Bridge] 🚀 INJECTED on", location.href, "ts=", Date.now());
     document.title = "🚀 " + document.title;
 
+    // === Anti-throttle: keep this tab/page alive even when in background ===
+    // 1. Screen Wake Lock — prevents screen sleep (works on Chromium/Kiwi)
+    let wakeLock = null;
+    async function ensureWakeLock() {
+        try {
+            if ('wakeLock' in navigator) {
+                wakeLock = await navigator.wakeLock.request('screen');
+                wakeLock.addEventListener('release', () => { wakeLock = null; });
+                console.log('[API Bridge] 🔒 Screen wake lock acquired');
+            }
+        } catch (e) { console.warn('[API Bridge] wakeLock fail', e); }
+    }
+    ensureWakeLock();
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && !wakeLock) ensureWakeLock();
+    });
+    // 2. Silent audio loop — prevents tab freeze on Chrome/Kiwi when screen off
+    try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        gain.gain.value = 0.0001; // inaudible but not zero
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.frequency.value = 1;
+        osc.start();
+        document.addEventListener('click', () => audioCtx.resume(), {once: true});
+        // try immediate resume (may need user gesture; fallback to first click)
+        audioCtx.resume().catch(()=>{});
+        console.log('[API Bridge] 🎵 silent audio loop started (anti-throttle)');
+    } catch(e) { console.warn('[API Bridge] silent audio fail', e); }
+    // 3. Periodic WS ping every 10s — forces socket activity
+    setInterval(() => {
+        if (typeof socket !== 'undefined' && socket && socket.readyState === WebSocket.OPEN) {
+            try { socket.send(JSON.stringify({request_id: 'ping', data: 'ping'})); } catch(e){}
+        }
+    }, 10000);
+    // === end anti-throttle ===
+
     // CSP on arena.ai blocks page-side fetch to 127.0.0.1. Use Tampermonkey's
     // GM_xmlhttpRequest which runs in the extension context and bypasses CSP.
     const GMX = (typeof GM_xmlhttpRequest !== 'undefined') ? GM_xmlhttpRequest
