@@ -987,23 +987,21 @@
     }
 
     async function mintRecaptchaViaSyntheticSend() {
+        const _d = (s) => bridgePost('http://127.0.0.1:5102/debug/log', 'SYNTH '+s, 'text/plain');
+        _d('enter');
         // Find chat input + Send button
         const input = document.querySelector('main textarea, form textarea, textarea[placeholder*="Ask" i], textarea[placeholder*="Send" i], textarea[placeholder*="Message" i], textarea')
                    || document.querySelector('input[type="text"]');
-        if (!input) {
-            bridgePost('http://127.0.0.1:5102/debug/log', 'SYNTH no_input', 'text/plain');
-            return '';
-        }
+        if (!input) { _d('no_input'); return ''; }
+        _d('found_input='+input.tagName);
         const btn = document.querySelector('button[aria-label*="Send" i], button[title*="Send" i]')
                  || Array.from(document.querySelectorAll('button')).find(b => {
                        const t = (b.textContent || '').toLowerCase();
                        const a = (b.getAttribute('aria-label') || '').toLowerCase();
                        return /\bsend\b/.test(t) || /\bsend\b/.test(a);
                   });
-        if (!btn) {
-            bridgePost('http://127.0.0.1:5102/debug/log', 'SYNTH no_send_btn', 'text/plain');
-            return '';
-        }
+        if (!btn) { _d('no_send_btn'); return ''; }
+        _d('found_btn aria='+(btn.getAttribute('aria-label')||'-').substring(0,30));
 
         // 1. Block navigation
         ensureNavBlock();
@@ -1020,10 +1018,12 @@
             await new Promise(r => setTimeout(r, 150));
 
             // 4. Direct-call React onClick handler (no native click → no UI side effects)
+            _d('value_set, looking for react props');
             const props = findReactPropsOnElement(btn);
             const before = window.recaptchaToken || '';
+            _d('props='+(!!props)+' onClick='+(props && typeof props.onClick));
             if (props && typeof props.onClick === 'function') {
-                bridgePost('http://127.0.0.1:5102/debug/log', 'SYNTH calling react_onClick', 'text/plain');
+                _d('calling react_onClick');
                 try {
                     const fakeEvent = {
                         preventDefault: () => {},
@@ -1035,25 +1035,30 @@
                         button: 0,
                     };
                     const r = props.onClick(fakeEvent);
+                    _d('onClick_returned r='+typeof r);
                     if (r && typeof r.then === 'function') {
-                        try { await Promise.race([r, new Promise(res => setTimeout(res, 8000))]); } catch(e){}
+                        try { await Promise.race([r, new Promise(res => setTimeout(res, 5000))]); } catch(e){}
+                        _d('onClick_promise_settled');
                     }
                 } catch(e) {
-                    bridgePost('http://127.0.0.1:5102/debug/log', 'SYNTH react_onClick err='+(e.message||e), 'text/plain');
+                    _d('react_onClick err='+(e.message||e).toString().substring(0,150));
                 }
             } else {
-                bridgePost('http://127.0.0.1:5102/debug/log', 'SYNTH no_react_props (fallback to click)', 'text/plain');
+                _d('no_react_props (fallback to click)');
                 btn.click();
             }
 
-            // 5. Wait for token mint via hooked execute()
-            for (let i = 0; i < 100; i++) {
+            // 5. Poll for token mint via hooked execute()
+            _d('polling_token');
+            for (let i = 0; i < 80; i++) {
                 await new Promise(r => setTimeout(r, 100));
                 const cur = window.recaptchaToken || '';
                 if (cur && cur !== before && cur.length > 50) {
+                    _d('TOKEN_CAPTURED len='+cur.length);
                     return cur;
                 }
             }
+            _d('poll_timeout');
             return window.recaptchaToken || '';
         } finally {
             window.__preventNavigation = false;
@@ -1265,7 +1270,18 @@
                             bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE rcap_diag gr='+hasGR+' cfg='+hasCfg+' scripts='+scriptCount+' site='+(foundKey||'NONE').substring(0,15)+' act='+(capturedAction||'NONE'), 'text/plain');
                             // PRIMARY: synthetic Send (forces arena's own React to mint via real flow)
                             bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE synth_mint start', 'text/plain');
-                            try { recaptchaV3 = await mintRecaptchaViaSyntheticSend(); } catch(e){
+                            try {
+                                recaptchaV3 = await Promise.race([
+                                    mintRecaptchaViaSyntheticSend(),
+                                    new Promise(r => setTimeout(() => r('TIMEOUT'), 20000)),
+                                ]);
+                                if (recaptchaV3 === 'TIMEOUT') {
+                                    bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE synth_mint HARD_TIMEOUT 20s', 'text/plain');
+                                    recaptchaV3 = '';
+                                    window.__preventNavigation = false;
+                                    window.__cancelNextCreateEval = false;
+                                }
+                            } catch(e){
                                 bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE synth_mint err='+(e.message||e), 'text/plain');
                             }
                             bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE synth_mint len='+(recaptchaV3||'').length, 'text/plain');
