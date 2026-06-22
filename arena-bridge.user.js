@@ -24,7 +24,7 @@
     console.log("[API Bridge] 🚀 INJECTED on", location.href, "ts=", Date.now());
     document.title = "🚀 " + document.title;
 
-    const SERVER_URL = "ws://localhost:5102/ws";
+    const SERVER_URL = "ws://127.0.0.1:5102/ws";
     let socket;
     let isCaptureModeActive = false;
     let is429Lockdown = false;
@@ -1344,8 +1344,8 @@
         const htmlContent = document.documentElement.outerHTML;
 
         const endpoints = [
-            'http://localhost:5102/internal/update_available_models',
-            'http://localhost:5102/internal/update_models'
+            'http://127.0.0.1:5102/internal/update_available_models',
+            'http://127.0.0.1:5102/internal/update_models'
         ];
 
         let success = false;
