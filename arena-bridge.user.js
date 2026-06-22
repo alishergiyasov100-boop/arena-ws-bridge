@@ -1341,8 +1341,73 @@
     // ============================================
     async function sendPageSource() {
         const htmlContent = document.documentElement.outerHTML;
-        console.log("[API Bridge] sending page source via bridgePost, len=" + htmlContent.length);
-        bridgePost('http://127.0.0.1:5102/internal/update_available_models', htmlContent, 'text/html; charset=utf-8');
+        console.log("[API Bridge] page len=" + htmlContent.length + ", extracting models via JSON parse");
+
+        // Try to extract models from in-page state instead of shipping the whole HTML
+        // (GM_xhr struggles with >500KB bodies on mobile).
+        const models = {};
+        const tryAdd = (name, id) => {
+            if (typeof name === 'string' && typeof id === 'string' && id.length === 36 && id.includes('-') && name.length > 1 && name.length < 80) {
+                models[name] = id;
+            }
+        };
+
+        // 1. __NEXT_DATA__ blob
+        try {
+            const el = document.getElementById('__NEXT_DATA__');
+            if (el && el.textContent) {
+                const data = JSON.parse(el.textContent);
+                const walk = (obj) => {
+                    if (!obj || typeof obj !== 'object') return;
+                    if (Array.isArray(obj)) { obj.forEach(walk); return; }
+                    const id = obj.id || obj.modelId;
+                    const name = obj.publicName || obj.public_name || obj.name || obj.slug;
+                    if (id && name) tryAdd(name, id);
+                    for (const v of Object.values(obj)) walk(v);
+                };
+                walk(data);
+            }
+        } catch(e) { console.warn('[API Bridge] NEXT_DATA parse err', e); }
+
+        // 2. Scan all <script> JSON blobs
+        try {
+            for (const s of document.querySelectorAll('script[type="application/json"]')) {
+                try {
+                    const j = JSON.parse(s.textContent);
+                    const walk = (obj) => {
+                        if (!obj || typeof obj !== 'object') return;
+                        if (Array.isArray(obj)) { obj.forEach(walk); return; }
+                        const id = obj.id || obj.modelId;
+                        const name = obj.publicName || obj.public_name || obj.name || obj.slug;
+                        if (id && name) tryAdd(name, id);
+                        for (const v of Object.values(obj)) walk(v);
+                    };
+                    walk(j);
+                } catch(e){}
+            }
+        } catch(e){}
+
+        // 3. Regex fallback over full HTML — done client-side so we ship only the result.
+        try {
+            const patterns = [
+                /"id"\s*:\s*"([a-f0-9-]{36})"[^}]{0,300}?"publicName"\s*:\s*"([^"]{2,80})"/g,
+                /"publicName"\s*:\s*"([^"]{2,80})"[^}]{0,300}?"id"\s*:\s*"([a-f0-9-]{36})"/g,
+                /"id"\s*:\s*"([a-f0-9-]{36})"[^}]{0,300}?"name"\s*:\s*"([^"]{2,80})"/g,
+                /"name"\s*:\s*"([^"]{2,80})"[^}]{0,300}?"id"\s*:\s*"([a-f0-9-]{36})"/g,
+            ];
+            for (const pat of patterns) {
+                let m;
+                while ((m = pat.exec(htmlContent)) !== null) {
+                    const a = m[1], b = m[2];
+                    if (a.length === 36 && a.includes('-')) tryAdd(b, a);
+                    else tryAdd(a, b);
+                }
+            }
+        } catch(e){}
+
+        const count = Object.keys(models).length;
+        console.log("[API Bridge] extracted " + count + " models, posting");
+        bridgePost('http://127.0.0.1:5102/internal/update_models_json', JSON.stringify(models), 'application/json');
         return;
         // dead code below (kept for diff minimal)
         const endpoints = [
