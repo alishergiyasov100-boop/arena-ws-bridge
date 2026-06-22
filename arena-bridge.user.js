@@ -986,9 +986,47 @@
         }
     }
 
+    async function dismissArenaModals() {
+        // Try to find and click dismiss/accept/close buttons on any visible modal/notification
+        const selectors = [
+            'button[aria-label*="close" i]',
+            'button[aria-label*="dismiss" i]',
+            'button[aria-label*="accept" i]',
+            'button[aria-label*="got it" i]',
+            'button[aria-label*="agree" i]',
+            'button[aria-label*="ok" i]',
+        ];
+        let dismissed = 0;
+        for (const sel of selectors) {
+            for (const b of document.querySelectorAll(sel)) {
+                if (b.offsetParent !== null) { // visible
+                    try { b.click(); dismissed++; } catch(e){}
+                }
+            }
+        }
+        // Also try text-based search
+        const textKeywords = ['accept', 'got it', 'i agree', 'continue', 'dismiss', 'understood', 'ok'];
+        for (const b of document.querySelectorAll('button')) {
+            const t = (b.textContent || '').trim().toLowerCase();
+            if (textKeywords.some(k => t === k || t === k+'.' || t === k+'!')) {
+                if (b.offsetParent !== null) {
+                    try { b.click(); dismissed++; } catch(e){}
+                }
+            }
+        }
+        return dismissed;
+    }
+
     async function mintRecaptchaViaNativeTap() {
         const _d = (s) => bridgePost('http://127.0.0.1:5102/debug/log', 'NATIVE_TAP '+s, 'text/plain');
         _d('enter');
+
+        // Dismiss any modals BEFORE trying anything
+        const dis = await dismissArenaModals();
+        if (dis > 0) {
+            _d('dismissed_modals='+dis);
+            await new Promise(r => setTimeout(r, 500));
+        }
 
         const input = document.querySelector('textarea');
         _d('input='+(!!input));
@@ -998,6 +1036,10 @@
                  || Array.from(document.querySelectorAll('button')).find(b => /\bsend\b/i.test(b.textContent||b.getAttribute('aria-label')||''));
         _d('btn='+(!!btn));
         if (!btn) return '';
+
+        // JS-level focus first
+        try { input.focus(); } catch(e){}
+        _d('js_focused activeEl='+(document.activeElement && document.activeElement.tagName));
 
         // Step 1: native tap on textarea (real OS focus)
         const ir = input.getBoundingClientRect();
