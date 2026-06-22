@@ -948,6 +948,50 @@
     // ============================================
     // Get fresh reCAPTCHA token
     // ============================================
+    // === Trigger arena's own Send button to force recaptcha mint, then cancel real submit ===
+    async function mintRecaptchaViaSyntheticSend() {
+        // Find arena's textarea — chat input
+        const input = document.querySelector('textarea[placeholder*="Ask"], textarea[placeholder*="Send"], textarea[placeholder*="Message"], main textarea, form textarea, textarea')
+                   || document.querySelector('input[type="text"]');
+        if (!input) return '';
+
+        // Set value via native React property setter (React tracks via descriptor)
+        try {
+            const proto = input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+            const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+            setter.call(input, 'mint');
+        } catch(e) {
+            input.value = 'mint';
+        }
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise(r => setTimeout(r, 200));
+
+        // Mark next /create-evaluation fetch to be cancelled
+        window.__cancelNextCreateEval = true;
+
+        // Find and click Send button
+        const btn = document.querySelector('button[aria-label*="Send" i], button[title*="Send" i], button[type="submit"][form]')
+                 || Array.from(document.querySelectorAll('button')).find(b => {
+                       const t = (b.textContent || '').toLowerCase();
+                       const a = (b.getAttribute('aria-label') || '').toLowerCase();
+                       return /\bsend\b|submit/.test(t) || /\bsend\b|submit/.test(a);
+                  });
+        if (!btn) {
+            window.__cancelNextCreateEval = false;
+            return '';
+        }
+        btn.click();
+
+        // Wait up to 10s for token mint via hooked execute()
+        const before = window.recaptchaToken || '';
+        for (let i = 0; i < 100; i++) {
+            await new Promise(r => setTimeout(r, 100));
+            const cur = window.recaptchaToken || '';
+            if (cur && cur !== before && cur.length > 50) return cur;
+        }
+        return window.recaptchaToken || '';
+    }
+
     async function mintRecaptchaViaIframe(siteKey, action) {
         return new Promise((resolve) => {
             const iframe = document.createElement('iframe');
@@ -1157,7 +1201,15 @@
                             }
                             try { recaptchaV3 = await getFreshRecaptchaToken(); } catch(e){}
                             bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE rcap_main len='+(recaptchaV3||'').length, 'text/plain');
-                            // Fallback: iframe-based mint
+                            // Fallback 1: synthetic Send-button click (forces arena's own React to mint)
+                            if (!recaptchaV3) {
+                                bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE synth_mint start', 'text/plain');
+                                try { recaptchaV3 = await mintRecaptchaViaSyntheticSend(); } catch(e){
+                                    bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE synth_mint err='+(e.message||e), 'text/plain');
+                                }
+                                bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE synth_mint len='+(recaptchaV3||'').length, 'text/plain');
+                            }
+                            // Fallback 2: iframe-based mint
                             if (!recaptchaV3 && foundKey) {
                                 bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE iframe_mint start', 'text/plain');
                                 try { recaptchaV3 = await mintRecaptchaViaIframe(foundKey, capturedAction || 'submit'); } catch(e){}
@@ -1559,6 +1611,14 @@
             urlString = urlArg.href;
         } else if (typeof urlArg === 'string') {
             urlString = urlArg;
+        }
+
+        // Cancel synthetic-mint fetch: when we triggered Send button just to harvest recaptcha,
+        // arena's React will eventually fire fetch to /create-evaluation; we abort it before it leaves.
+        if (window.__cancelNextCreateEval && urlString && urlString.includes('/create-evaluation')) {
+            window.__cancelNextCreateEval = false;
+            console.log('[API Bridge] ✂️ cancelled synthetic /create-evaluation (recaptcha already harvested)');
+            return Promise.resolve(new Response('', { status: 499, statusText: 'Synthetic cancelled' }));
         }
 
         if (urlString && urlString.includes('/create-evaluation') && !window.isApiBridgeRequest) {
