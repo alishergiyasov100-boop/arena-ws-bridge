@@ -947,6 +947,32 @@
     // ============================================
     // Get fresh reCAPTCHA token
     // ============================================
+    async function ensureGrecaptchaLoaded(siteKey) {
+        if (window.grecaptcha?.enterprise?.execute || window.grecaptcha?.execute) return true;
+        // Manually load recaptcha v3 script
+        const candidates = [
+            'https://www.google.com/recaptcha/enterprise.js?render=' + encodeURIComponent(siteKey),
+            'https://www.google.com/recaptcha/api.js?render=' + encodeURIComponent(siteKey),
+        ];
+        for (const url of candidates) {
+            try {
+                await new Promise((resolve, reject) => {
+                    const s = document.createElement('script');
+                    s.src = url;
+                    s.onload = resolve;
+                    s.onerror = reject;
+                    document.head.appendChild(s);
+                });
+                // wait up to 5s for grecaptcha to appear
+                for (let i = 0; i < 50; i++) {
+                    if (window.grecaptcha?.enterprise?.execute || window.grecaptcha?.execute) return true;
+                    await new Promise(r => setTimeout(r, 100));
+                }
+            } catch(e){}
+        }
+        return false;
+    }
+
     async function getFreshRecaptchaToken() {
         return new Promise((resolve) => {
             const captcha = window.grecaptcha?.enterprise || window.grecaptcha;
@@ -1073,6 +1099,11 @@
                             const scriptCount = document.querySelectorAll('script[src*="recaptcha"]').length;
                             try { if (!foundKey) foundKey = findRecaptchaSiteKey(); } catch(e){}
                             bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE rcap_diag gr='+hasGR+' cfg='+hasCfg+' scripts='+scriptCount+' site='+(foundKey||'NONE').substring(0,15)+' act='+(capturedAction||'NONE'), 'text/plain');
+                            // Ensure grecaptcha is actually loaded (arena lazy-loads it)
+                            if (foundKey) {
+                                const loaded = await ensureGrecaptchaLoaded(foundKey);
+                                bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE grecaptcha_loaded='+loaded, 'text/plain');
+                            }
                             try { recaptchaV3 = await getFreshRecaptchaToken(); } catch(e){}
                             bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE rcap_got len='+(recaptchaV3||'').length+' first20='+(recaptchaV3||'').substring(0,20), 'text/plain');
                             // If captured token is fresh from real arena UI use, prefer it
