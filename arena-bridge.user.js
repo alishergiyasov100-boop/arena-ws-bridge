@@ -1339,8 +1339,23 @@
     // ============================================
     // Page Source Sending (tries both endpoints)
     // ============================================
+    async function fetchArenaHomeHTML() {
+        // Fetch arena.ai root with same cookies; models live in initialModels JSON.
+        try {
+            const r = await fetch('/', {method: 'GET', credentials: 'include', headers: {'Accept': 'text/html'}});
+            if (r.ok) return await r.text();
+        } catch(e) { console.warn('[API Bridge] home fetch err', e); }
+        return '';
+    }
+
     async function sendPageSource() {
-        const htmlContent = document.documentElement.outerHTML;
+        let htmlContent = document.documentElement.outerHTML;
+        // If current page has no initialModels — try the home page.
+        if (!/"initialModels"\s*:/.test(htmlContent) && !/\\"initialModels\\"/.test(htmlContent)) {
+            console.log("[API Bridge] no initialModels here, fetching arena.ai root...");
+            const home = await fetchArenaHomeHTML();
+            if (home) htmlContent = home;
+        }
         console.log("[API Bridge] page len=" + htmlContent.length + ", extracting models via JSON parse");
 
         // Try to extract models from in-page state instead of shipping the whole HTML
@@ -1387,7 +1402,29 @@
             }
         } catch(e){}
 
-        // 3. Regex fallback over full HTML — done client-side so we ship only the result.
+        // 3a. initialModels JSON blob (used by LMAB upstream — escaped inside HTML).
+        try {
+            const m = htmlContent.match(/\\"initialModels\\":(\[.*?\]),\\"initialModel[A-Z]Id/s)
+                   || htmlContent.match(/"initialModels"\s*:\s*(\[.*?\])\s*,\s*"initialModel[A-Z]Id/s);
+            if (m) {
+                let raw = m[1];
+                // unescape if double-escaped JSON
+                if (raw.includes('\\"')) {
+                    try { raw = JSON.parse('"' + raw.replace(/^\[/, '').replace(/\]$/, '').replace(/"/g,'\\"') + '"'); } catch(e){}
+                    // Simpler: just unescape backslashes
+                    raw = raw.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+                }
+                try {
+                    const arr = JSON.parse(raw);
+                    if (Array.isArray(arr)) {
+                        for (const m2 of arr) tryAdd(m2.publicName || m2.name, m2.id);
+                        console.log("[API Bridge] initialModels found:", arr.length, "items");
+                    }
+                } catch(e) { console.warn('[API Bridge] initialModels parse err', e); }
+            }
+        } catch(e){}
+
+        // 3b. Regex fallback over full HTML — done client-side so we ship only the result.
         try {
             const patterns = [
                 /"id"\s*:\s*"([a-f0-9-]{36})"[^}]{0,300}?"publicName"\s*:\s*"([^"]{2,80})"/g,
