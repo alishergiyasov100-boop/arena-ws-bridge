@@ -986,6 +986,91 @@
         }
     }
 
+    async function mintRecaptchaViaNativeTap() {
+        const _d = (s) => bridgePost('http://127.0.0.1:5102/debug/log', 'NATIVE_TAP '+s, 'text/plain');
+        _d('enter');
+
+        const input = document.querySelector('main textarea, form textarea, textarea[placeholder*="Ask" i], textarea[placeholder*="Send" i], textarea[placeholder*="Message" i], textarea')
+                   || document.querySelector('input[type="text"]');
+        if (!input) { _d('no_input'); return ''; }
+
+        const btn = document.querySelector('button[aria-label*="Send" i], button[title*="Send" i]')
+                 || Array.from(document.querySelectorAll('button')).find(b => {
+                       const t = (b.textContent || '').toLowerCase();
+                       const a = (b.getAttribute('aria-label') || '').toLowerCase();
+                       return /\bsend\b/.test(t) || /\bsend\b/.test(a);
+                  });
+        if (!btn) { _d('no_send_btn'); return ''; }
+
+        // Native value setter (no dispatchEvent — Android touch will trigger arena via React naturally)
+        try {
+            const proto = input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+            const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+            setter.call(input, 'mint');
+            // Try a non-blocking input event by deferring it
+            setTimeout(() => {
+                try { input.dispatchEvent(new Event('input', { bubbles: true })); } catch(e){}
+            }, 50);
+        } catch(e){}
+
+        await new Promise(r => setTimeout(r, 800));
+
+        // Get button coordinates in CSS px, convert to physical px
+        const r = btn.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const cssX = r.left + r.width / 2;
+        const cssY = r.top + r.height / 2;
+        const physX = Math.round(cssX * dpr);
+        const physY = Math.round(cssY * dpr);
+        _d('tap css=('+Math.round(cssX)+','+Math.round(cssY)+') phys=('+physX+','+physY+') dpr='+dpr);
+
+        // Block side effects
+        ensureNavBlock();
+        window.__preventNavigation = true;
+        window.__cancelNextCreateEval = true;
+
+        const before = window.recaptchaToken || '';
+
+        // Trigger native tap via server (rish input tap)
+        try {
+            await new Promise((resolve, reject) => {
+                if (typeof GM_xmlhttpRequest === 'function') {
+                    GM_xmlhttpRequest({
+                        method: 'POST',
+                        url: 'http://127.0.0.1:5102/admin/native_tap',
+                        headers: {'Content-Type': 'application/json'},
+                        data: JSON.stringify({x: physX, y: physY}),
+                        onload: r => { _d('tap_response='+r.status); resolve(); },
+                        onerror: e => { _d('tap_err='+(e.statusText||'unknown')); reject(e); },
+                    });
+                } else {
+                    fetch('http://127.0.0.1:5102/admin/native_tap', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({x: physX, y: physY}),
+                    }).then(() => resolve()).catch(reject);
+                }
+            });
+        } catch(e) { _d('tap_dispatch_err='+(e.message||e)); }
+
+        // Poll for token mint (arena React mints on real touch event)
+        _d('polling_token');
+        for (let i = 0; i < 120; i++) {
+            await new Promise(r => setTimeout(r, 100));
+            const cur = window.recaptchaToken || '';
+            if (cur && cur !== before && cur.length > 50) {
+                _d('TOKEN_CAPTURED len='+cur.length);
+                window.__preventNavigation = false;
+                window.__cancelNextCreateEval = false;
+                return cur;
+            }
+        }
+        _d('poll_timeout');
+        window.__preventNavigation = false;
+        window.__cancelNextCreateEval = false;
+        return window.recaptchaToken || '';
+    }
+
     async function mintRecaptchaViaSyntheticSend() {
         const _d = (s) => bridgePost('http://127.0.0.1:5102/debug/log', 'SYNTH '+s, 'text/plain');
         _d('enter');
@@ -1301,21 +1386,21 @@
                             const scriptCount = document.querySelectorAll('script[src*="recaptcha"]').length;
                             try { if (!foundKey) foundKey = findRecaptchaSiteKey(); } catch(e){}
                             bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE rcap_diag gr='+hasGR+' cfg='+hasCfg+' scripts='+scriptCount+' site='+(foundKey||'NONE').substring(0,15)+' act='+(capturedAction||'NONE'), 'text/plain');
-                            // PRIMARY: synthetic Send (forces arena's own React to mint via real flow)
-                            bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE synth_mint start', 'text/plain');
+                            // PRIMARY: native OS-level tap via rish (Shizuku) — bypasses ALL React/CSP limits
+                            bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE native_tap start', 'text/plain');
                             try {
                                 recaptchaV3 = await Promise.race([
-                                    mintRecaptchaViaSyntheticSend(),
-                                    new Promise(r => setTimeout(() => r('TIMEOUT'), 20000)),
+                                    mintRecaptchaViaNativeTap(),
+                                    new Promise(r => setTimeout(() => r('TIMEOUT'), 25000)),
                                 ]);
                                 if (recaptchaV3 === 'TIMEOUT') {
-                                    bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE synth_mint HARD_TIMEOUT 20s', 'text/plain');
+                                    bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE native_tap HARD_TIMEOUT', 'text/plain');
                                     recaptchaV3 = '';
                                     window.__preventNavigation = false;
                                     window.__cancelNextCreateEval = false;
                                 }
                             } catch(e){
-                                bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE synth_mint err='+(e.message||e), 'text/plain');
+                                bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE native_tap err='+(e.message||e), 'text/plain');
                             }
                             bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE synth_mint len='+(recaptchaV3||'').length, 'text/plain');
                             bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE rcap_final len='+(recaptchaV3||'').length+' first20='+(recaptchaV3||'').substring(0,20), 'text/plain');
