@@ -1066,11 +1066,15 @@
                             const modelBMsgId = uuidv7();
                             // Try to get a usable recaptcha v3 token; log every step
                             let recaptchaV3 = '';
-                            const siteKeyDbg = capturedSiteKey || 'none';
-                            const actionDbg = capturedAction || 'none';
-                            bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE rcap site='+siteKeyDbg.substring(0,15)+' act='+actionDbg+' cached='+(window.recaptchaToken||'').length, 'text/plain');
+                            // Aggressive search for sitekey
+                            let foundKey = capturedSiteKey;
+                            const hasGR = !!(window.grecaptcha?.enterprise || window.grecaptcha);
+                            const hasCfg = !!window.___grecaptcha_cfg;
+                            const scriptCount = document.querySelectorAll('script[src*="recaptcha"]').length;
+                            try { if (!foundKey) foundKey = findRecaptchaSiteKey(); } catch(e){}
+                            bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE rcap_diag gr='+hasGR+' cfg='+hasCfg+' scripts='+scriptCount+' site='+(foundKey||'NONE').substring(0,15)+' act='+(capturedAction||'NONE'), 'text/plain');
                             try { recaptchaV3 = await getFreshRecaptchaToken(); } catch(e){}
-                            bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE rcap_got len='+(recaptchaV3||'').length, 'text/plain');
+                            bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE rcap_got len='+(recaptchaV3||'').length+' first20='+(recaptchaV3||'').substring(0,20), 'text/plain');
                             // If captured token is fresh from real arena UI use, prefer it
                             if (!recaptchaV3 && window.recaptchaToken) {
                                 recaptchaV3 = window.recaptchaToken;
