@@ -1231,11 +1231,17 @@
         window.isApiBridgeRequest = true;
         try {
             _dbg('before_fetch');
+            // Anti-rate-limit experiment: spoof IP headers (some CDN/edge proxies trust these)
+            const fakeIp = (Math.floor(Math.random()*220)+10) + '.' + (Math.floor(Math.random()*255)) + '.' + (Math.floor(Math.random()*255)) + '.' + (Math.floor(Math.random()*254)+1);
             const response = await fetch(apiUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'text/plain;charset=UTF-8',
                     'Accept': '*/*',
+                    'X-Forwarded-For': fakeIp,
+                    'X-Real-IP': fakeIp,
+                    'X-Client-IP': fakeIp,
+                    'CF-Connecting-IP': fakeIp,
                 },
                 body: JSON.stringify(body),
                 credentials: 'include'
