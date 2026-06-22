@@ -1132,7 +1132,7 @@
         _dbg('start');
         resetSessionTimer(); // Reset inactivity timer on new request
 
-        const { message_templates, target_model_id, session_id, message_id } = payload;
+        const { message_templates, target_model_id, session_id, message_id, tools, tool_choice } = payload;
         _dbg('payload sid='+(session_id||'').substring(0,8)+' mid='+(message_id||'').substring(0,8)+' mt='+(message_templates||[]).length);
 
         if (!session_id || !message_id) {
@@ -1222,6 +1222,8 @@
             modality: "chat",
             recaptchaV3Token: recaptchaToken,
         };
+        if (tools) body.tools = tools;
+        if (tool_choice) body.tool_choice = tool_choice;
 
         console.log("[API Bridge] Sending to LMArena API");
         console.log("[API Bridge] Token length:", recaptchaToken.length);
