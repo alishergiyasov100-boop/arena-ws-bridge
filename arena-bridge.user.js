@@ -15,6 +15,7 @@
 // @connect      127.0.0.1
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
+// @grant        GM_addElement
 // @run-at       document-end
 // @downloadURL https://update.greasyfork.org/scripts/565469/Arena%20API%20Bridge%20-%20Standard%20Edition%20v327.user.js
 // @updateURL https://update.greasyfork.org/scripts/565469/Arena%20API%20Bridge%20-%20Standard%20Edition%20v327.meta.js
@@ -949,28 +950,28 @@
     // ============================================
     async function ensureGrecaptchaLoaded(siteKey) {
         if (window.grecaptcha?.enterprise?.execute || window.grecaptcha?.execute) return true;
-        // Manually load recaptcha v3 script
         const candidates = [
             'https://www.google.com/recaptcha/enterprise.js?render=' + encodeURIComponent(siteKey),
             'https://www.google.com/recaptcha/api.js?render=' + encodeURIComponent(siteKey),
         ];
         for (const url of candidates) {
             try {
-                await new Promise((resolve, reject) => {
+                // Prefer GM_addElement — runs in extension context, bypasses page CSP
+                if (typeof GM_addElement === 'function') {
+                    GM_addElement('script', { src: url });
+                } else {
                     const s = document.createElement('script');
                     s.src = url;
-                    s.onload = resolve;
-                    s.onerror = reject;
                     document.head.appendChild(s);
-                });
-                // wait up to 5s for grecaptcha to appear
-                for (let i = 0; i < 50; i++) {
+                }
+                // wait up to 10s
+                for (let i = 0; i < 100; i++) {
                     if (window.grecaptcha?.enterprise?.execute || window.grecaptcha?.execute) return true;
                     await new Promise(r => setTimeout(r, 100));
                 }
             } catch(e){}
         }
-        return false;
+        return !!(window.grecaptcha?.enterprise?.execute || window.grecaptcha?.execute);
     }
 
     async function getFreshRecaptchaToken() {
