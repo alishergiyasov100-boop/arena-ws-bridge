@@ -948,48 +948,116 @@
     // ============================================
     // Get fresh reCAPTCHA token
     // ============================================
-    // === Trigger arena's own Send button to force recaptcha mint, then cancel real submit ===
-    async function mintRecaptchaViaSyntheticSend() {
-        // Find arena's textarea — chat input
-        const input = document.querySelector('textarea[placeholder*="Ask"], textarea[placeholder*="Send"], textarea[placeholder*="Message"], main textarea, form textarea, textarea')
-                   || document.querySelector('input[type="text"]');
-        if (!input) return '';
-
-        // Set value via native React property setter (React tracks via descriptor)
-        try {
-            const proto = input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-            const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
-            setter.call(input, 'mint');
-        } catch(e) {
-            input.value = 'mint';
+    // === Synthetic mint: directly invoke React onClick handler + block all side effects ===
+    function findReactPropsOnElement(el) {
+        if (!el) return null;
+        for (const k of Object.keys(el)) {
+            if (k.startsWith('__reactProps$') || k.startsWith('__reactInternalProps$')) {
+                return el[k];
+            }
         }
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        await new Promise(r => setTimeout(r, 200));
+        return null;
+    }
 
-        // Mark next /create-evaluation fetch to be cancelled
-        window.__cancelNextCreateEval = true;
+    let _navHook = null;
+    function installNavBlock() {
+        if (_navHook) return;
+        const ps = history.pushState.bind(history);
+        const rs = history.replaceState.bind(history);
+        _navHook = { ps, rs };
+        history.pushState = function(...args) {
+            if (window.__preventNavigation) {
+                console.log('[API Bridge] ⛔ blocked pushState', args[2]);
+                return;
+            }
+            return ps(...args);
+        };
+        history.replaceState = function(...args) {
+            if (window.__preventNavigation) {
+                console.log('[API Bridge] ⛔ blocked replaceState', args[2]);
+                return;
+            }
+            return rs(...args);
+        };
+        // beforeunload safety
+        window.addEventListener('beforeunload', (e) => {
+            if (window.__preventNavigation) { e.preventDefault(); return ''; }
+        });
+    }
+    installNavBlock();
 
-        // Find and click Send button
-        const btn = document.querySelector('button[aria-label*="Send" i], button[title*="Send" i], button[type="submit"][form]')
+    async function mintRecaptchaViaSyntheticSend() {
+        // Find chat input + Send button
+        const input = document.querySelector('main textarea, form textarea, textarea[placeholder*="Ask" i], textarea[placeholder*="Send" i], textarea[placeholder*="Message" i], textarea')
+                   || document.querySelector('input[type="text"]');
+        if (!input) {
+            bridgePost('http://127.0.0.1:5102/debug/log', 'SYNTH no_input', 'text/plain');
+            return '';
+        }
+        const btn = document.querySelector('button[aria-label*="Send" i], button[title*="Send" i]')
                  || Array.from(document.querySelectorAll('button')).find(b => {
                        const t = (b.textContent || '').toLowerCase();
                        const a = (b.getAttribute('aria-label') || '').toLowerCase();
-                       return /\bsend\b|submit/.test(t) || /\bsend\b|submit/.test(a);
+                       return /\bsend\b/.test(t) || /\bsend\b/.test(a);
                   });
         if (!btn) {
-            window.__cancelNextCreateEval = false;
+            bridgePost('http://127.0.0.1:5102/debug/log', 'SYNTH no_send_btn', 'text/plain');
             return '';
         }
-        btn.click();
 
-        // Wait up to 10s for token mint via hooked execute()
-        const before = window.recaptchaToken || '';
-        for (let i = 0; i < 100; i++) {
-            await new Promise(r => setTimeout(r, 100));
-            const cur = window.recaptchaToken || '';
-            if (cur && cur !== before && cur.length > 50) return cur;
+        // 1. Block navigation
+        window.__preventNavigation = true;
+        // 2. Block real /create-evaluation fetch
+        window.__cancelNextCreateEval = true;
+
+        try {
+            // 3. Set input value via React-aware setter
+            const proto = input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+            const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+            setter.call(input, 'mint');
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            await new Promise(r => setTimeout(r, 150));
+
+            // 4. Direct-call React onClick handler (no native click → no UI side effects)
+            const props = findReactPropsOnElement(btn);
+            const before = window.recaptchaToken || '';
+            if (props && typeof props.onClick === 'function') {
+                bridgePost('http://127.0.0.1:5102/debug/log', 'SYNTH calling react_onClick', 'text/plain');
+                try {
+                    const fakeEvent = {
+                        preventDefault: () => {},
+                        stopPropagation: () => {},
+                        nativeEvent: {},
+                        currentTarget: btn,
+                        target: btn,
+                        type: 'click',
+                        button: 0,
+                    };
+                    const r = props.onClick(fakeEvent);
+                    if (r && typeof r.then === 'function') {
+                        try { await Promise.race([r, new Promise(res => setTimeout(res, 8000))]); } catch(e){}
+                    }
+                } catch(e) {
+                    bridgePost('http://127.0.0.1:5102/debug/log', 'SYNTH react_onClick err='+(e.message||e), 'text/plain');
+                }
+            } else {
+                bridgePost('http://127.0.0.1:5102/debug/log', 'SYNTH no_react_props (fallback to click)', 'text/plain');
+                btn.click();
+            }
+
+            // 5. Wait for token mint via hooked execute()
+            for (let i = 0; i < 100; i++) {
+                await new Promise(r => setTimeout(r, 100));
+                const cur = window.recaptchaToken || '';
+                if (cur && cur !== before && cur.length > 50) {
+                    return cur;
+                }
+            }
+            return window.recaptchaToken || '';
+        } finally {
+            window.__preventNavigation = false;
+            window.__cancelNextCreateEval = false;
         }
-        return window.recaptchaToken || '';
     }
 
     async function mintRecaptchaViaIframe(siteKey, action) {
