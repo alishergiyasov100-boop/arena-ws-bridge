@@ -990,39 +990,32 @@
         const _d = (s) => bridgePost('http://127.0.0.1:5102/debug/log', 'NATIVE_TAP '+s, 'text/plain');
         _d('enter');
 
-        const input = document.querySelector('main textarea, form textarea, textarea[placeholder*="Ask" i], textarea[placeholder*="Send" i], textarea[placeholder*="Message" i], textarea')
-                   || document.querySelector('input[type="text"]');
-        if (!input) { _d('no_input'); return ''; }
+        const input = document.querySelector('textarea');
+        _d('input='+(!!input));
+        if (!input) return '';
 
-        const btn = document.querySelector('button[aria-label*="Send" i], button[title*="Send" i]')
-                 || Array.from(document.querySelectorAll('button')).find(b => {
-                       const t = (b.textContent || '').toLowerCase();
-                       const a = (b.getAttribute('aria-label') || '').toLowerCase();
-                       return /\bsend\b/.test(t) || /\bsend\b/.test(a);
-                  });
-        if (!btn) { _d('no_send_btn'); return ''; }
+        const btn = document.querySelector('button[aria-label*="Send" i]')
+                 || Array.from(document.querySelectorAll('button')).find(b => /\bsend\b/i.test(b.textContent||b.getAttribute('aria-label')||''));
+        _d('btn='+(!!btn));
+        if (!btn) return '';
 
-        // Native value setter (no dispatchEvent — Android touch will trigger arena via React naturally)
+        // Set value + fire input event ALL in microtask to keep flow non-blocking
         try {
-            const proto = input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+            const proto = HTMLTextAreaElement.prototype;
             const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
             setter.call(input, 'mint');
-            // Try a non-blocking input event by deferring it
-            setTimeout(() => {
-                try { input.dispatchEvent(new Event('input', { bubbles: true })); } catch(e){}
-            }, 50);
-        } catch(e){}
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            _d('input_dispatched');
+        } catch(e){ _d('setter_err='+(e.message||e).toString().substring(0,80)); }
 
-        await new Promise(r => setTimeout(r, 800));
-
-        // Get button coordinates in CSS px, convert to physical px
+        // Get button coordinates immediately (no setTimeout)
         const r = btn.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
         const cssX = r.left + r.width / 2;
         const cssY = r.top + r.height / 2;
         const physX = Math.round(cssX * dpr);
         const physY = Math.round(cssY * dpr);
-        _d('tap css=('+Math.round(cssX)+','+Math.round(cssY)+') phys=('+physX+','+physY+') dpr='+dpr);
+        _d('tap rect=('+Math.round(r.left)+','+Math.round(r.top)+','+Math.round(r.width)+','+Math.round(r.height)+') phys=('+physX+','+physY+') dpr='+dpr);
 
         // Block side effects
         ensureNavBlock();
