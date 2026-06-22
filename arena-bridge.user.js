@@ -1038,9 +1038,9 @@
         }
         _d('typing_no_token');
 
-        // Get button coordinates with browser-chrome offset
+        // Step 3 (fallback): tap Send button if typing alone didn't mint
+        _d('fallback_tap_send');
         const r = btn.getBoundingClientRect();
-        const dpr = window.devicePixelRatio || 1;
         const cssX = r.left + r.width / 2;
         const cssY = r.top + r.height / 2;
         // Browser chrome height = window.outerHeight - window.innerHeight (toolbar)
@@ -1048,14 +1048,7 @@
         const chromeY_css = (window.outerHeight - window.innerHeight) + (window.screenY || 0);
         const physX = Math.round((cssX + (window.screenX || 0)) * dpr);
         const physY = Math.round((cssY + chromeY_css) * dpr);
-        _d('tap css=('+Math.round(cssX)+','+Math.round(cssY)+') chrome=('+(window.screenX||0)+','+chromeY_css+') outer=('+window.outerWidth+','+window.outerHeight+') inner=('+window.innerWidth+','+window.innerHeight+') screen=('+screen.width+','+screen.height+') phys=('+physX+','+physY+') dpr='+dpr);
-        _d('btn disabled='+btn.disabled+' enabled='+!btn.disabled);
-
-        // Block side effects
-        ensureNavBlock();
-        window.__preventNavigation = true;
-        window.__cancelNextCreateEval = true;
-
+        _d('btn phys=('+physX+','+physY+') disabled='+btn.disabled);
         const before = window.recaptchaToken || '';
 
         // Trigger native tap via server (rish input tap)
