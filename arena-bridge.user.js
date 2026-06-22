@@ -1222,8 +1222,8 @@
             modality: "chat",
             recaptchaV3Token: recaptchaToken,
         };
-        if (tools) body.tools = tools;
-        if (tool_choice) body.tool_choice = tool_choice;
+        // arena.ai battle endpoint silently kills stream when tools field present —
+        // emulation is done server-side via system-prompt injection, not here.
 
         console.log("[API Bridge] Sending to LMArena API");
         console.log("[API Bridge] Token length:", recaptchaToken.length);
