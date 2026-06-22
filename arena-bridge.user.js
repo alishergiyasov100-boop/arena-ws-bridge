@@ -1248,8 +1248,23 @@
             } catch (e) {}
         }
 
+        // DEBUG: log every fetch URL while in capture mode, so we can see what arena.ai actually calls.
+        if (urlString && isCaptureModeActive && !window.isApiBridgeRequest) {
+            try {
+                const method = (args[1] && args[1].method) || (urlArg instanceof Request ? urlArg.method : 'GET');
+                fetch('http://127.0.0.1:5102/debug/log', {
+                    method: 'POST',
+                    headers: {'Content-Type':'text/plain'},
+                    body: method + ' ' + urlString.substring(0, 400),
+                }).catch(()=>{});
+            } catch(e){}
+        }
+
         if (urlString) {
-            const match = urlString.match(/\/nextjs-api\/stream\/retry-evaluation-session-message\/([a-f0-9-]+)\/messages\/([a-f0-9-]+)/);
+            // Try multiple regex patterns — arena.ai may have changed endpoint name.
+            let match = urlString.match(/\/nextjs-api\/stream\/retry-evaluation-session-message\/([a-f0-9-]+)\/messages\/([a-f0-9-]+)/);
+            if (!match) match = urlString.match(/\/evaluation[s]?\/([a-f0-9-]{36})\/messages\/([a-f0-9-]{36})/);
+            if (!match) match = urlString.match(/\/([a-f0-9-]{36})\/messages\/([a-f0-9-]{36})/);
 
             if (match && !window.isApiBridgeRequest && isCaptureModeActive) {
                 const sessionId = match[1];
