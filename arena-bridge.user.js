@@ -1010,12 +1010,13 @@
         window.__cancelNextCreateEval = true;
 
         try {
-            // 3. Set input value via React-aware setter
-            const proto = input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-            const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
-            setter.call(input, 'mint');
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            await new Promise(r => setTimeout(r, 150));
+            // 3. Set input value via React-aware setter — NO dispatchEvent (React onInput may sync-freeze)
+            try {
+                const proto = input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+                const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+                setter.call(input, 'mint');
+            } catch(e) { _d('setter_err='+(e.message||e).toString().substring(0,80)); }
+            _d('value_set_no_dispatch');
 
             // 4. Direct-call React onClick handler (no native click → no UI side effects)
             _d('value_set, looking for react props');
