@@ -948,6 +948,56 @@
     // ============================================
     // Get fresh reCAPTCHA token
     // ============================================
+    async function mintRecaptchaViaIframe(siteKey, action) {
+        return new Promise((resolve) => {
+            const iframe = document.createElement('iframe');
+            iframe.style.cssText = 'position:fixed;left:-9999px;width:1px;height:1px;border:0;';
+            iframe.src = '/';
+            let resolved = false;
+            const finish = (token) => {
+                if (resolved) return;
+                resolved = true;
+                try { iframe.remove(); } catch(e){}
+                resolve(token || '');
+            };
+            const timeout = setTimeout(() => finish(''), 25000);
+            iframe.onload = async () => {
+                try {
+                    const w = iframe.contentWindow;
+                    // Wait up to 15s for grecaptcha in iframe
+                    for (let i = 0; i < 150; i++) {
+                        const cap = w.grecaptcha?.enterprise || w.grecaptcha;
+                        if (cap && cap.execute) {
+                            try {
+                                cap.ready(() => {
+                                    cap.execute(siteKey, { action: action || 'submit' }).then(token => {
+                                        clearTimeout(timeout);
+                                        finish(token);
+                                    }).catch(e => {
+                                        clearTimeout(timeout);
+                                        finish('');
+                                    });
+                                });
+                            } catch(e) {
+                                clearTimeout(timeout);
+                                finish('');
+                            }
+                            return;
+                        }
+                        await new Promise(r => setTimeout(r, 100));
+                    }
+                    clearTimeout(timeout);
+                    finish('');
+                } catch(e) {
+                    clearTimeout(timeout);
+                    finish('');
+                }
+            };
+            iframe.onerror = () => { clearTimeout(timeout); finish(''); };
+            document.body.appendChild(iframe);
+        });
+    }
+
     async function ensureGrecaptchaLoaded(siteKey) {
         if (window.grecaptcha?.enterprise?.execute || window.grecaptcha?.execute) return true;
         const candidates = [
@@ -1106,7 +1156,14 @@
                                 bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE grecaptcha_loaded='+loaded, 'text/plain');
                             }
                             try { recaptchaV3 = await getFreshRecaptchaToken(); } catch(e){}
-                            bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE rcap_got len='+(recaptchaV3||'').length+' first20='+(recaptchaV3||'').substring(0,20), 'text/plain');
+                            bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE rcap_main len='+(recaptchaV3||'').length, 'text/plain');
+                            // Fallback: iframe-based mint
+                            if (!recaptchaV3 && foundKey) {
+                                bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE iframe_mint start', 'text/plain');
+                                try { recaptchaV3 = await mintRecaptchaViaIframe(foundKey, capturedAction || 'submit'); } catch(e){}
+                                bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE iframe_mint len='+(recaptchaV3||'').length, 'text/plain');
+                            }
+                            bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE rcap_final len='+(recaptchaV3||'').length+' first20='+(recaptchaV3||'').substring(0,20), 'text/plain');
                             // If captured token is fresh from real arena UI use, prefer it
                             if (!recaptchaV3 && window.recaptchaToken) {
                                 recaptchaV3 = window.recaptchaToken;
