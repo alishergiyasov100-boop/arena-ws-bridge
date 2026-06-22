@@ -797,6 +797,41 @@
     hookGrecaptcha();
 
     // ============================================
+    // Hook XMLHttpRequest — arena.ai may use XHR instead of fetch
+    // ============================================
+    (function hookXHR() {
+        const origOpen = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+            try {
+                const u = String(url || '');
+                if (u && isCaptureModeActive && !u.includes('127.0.0.1')) {
+                    fetch('http://127.0.0.1:5102/debug/log', {
+                        method: 'POST',
+                        headers: {'Content-Type':'text/plain'},
+                        body: 'xhr ' + method + ' ' + u.substring(0, 400),
+                    }).catch(()=>{});
+                }
+                // Try to capture session/message IDs from XHR url too
+                if (isCaptureModeActive && !window.isApiBridgeRequest) {
+                    let m = u.match(/\/nextjs-api\/stream\/retry-evaluation-session-message\/([a-f0-9-]{36})\/messages\/([a-f0-9-]{36})/);
+                    if (!m) m = u.match(/\/evaluation[s]?\/([a-f0-9-]{36})\/messages\/([a-f0-9-]{36})/);
+                    if (!m) m = u.match(/\/([a-f0-9-]{36})\/messages\/([a-f0-9-]{36})/);
+                    if (m) {
+                        console.log('[API Bridge] 🎯 XHR captured IDs:', m[1], m[2]);
+                        isCaptureModeActive = false;
+                        fetch('http://127.0.0.1:5102/update', {
+                            method: 'POST',
+                            headers: {'Content-Type':'application/json'},
+                            body: JSON.stringify({sessionId: m[1], messageId: m[2]}),
+                        }).catch(()=>{});
+                    }
+                }
+            } catch(e){}
+            return origOpen.call(this, method, url, ...rest);
+        };
+    })();
+
+    // ============================================
     // Find reCAPTCHA site key
     // ============================================
     function findRecaptchaSiteKey() {
@@ -942,6 +977,14 @@
             console.log("[API Bridge] ✅ WebSocket connection established.");
             document.title = "✅ " + document.title;
             resetSessionTimer();
+            // ping debug log so we know userscript is alive on main page
+            try {
+                fetch('http://127.0.0.1:5102/debug/log', {
+                    method: 'POST',
+                    headers: {'Content-Type':'text/plain'},
+                    body: 'ALIVE main page: ' + location.href + ' UA=' + navigator.userAgent.substring(0,80),
+                }).catch(()=>{});
+            } catch(e){}
         };
 
         socket.onmessage = async (event) => {
@@ -1249,13 +1292,13 @@
         }
 
         // DEBUG: log every fetch URL while in capture mode, so we can see what arena.ai actually calls.
-        if (urlString && isCaptureModeActive && !window.isApiBridgeRequest) {
+        if (urlString && isCaptureModeActive && !window.isApiBridgeRequest && !urlString.includes('127.0.0.1')) {
             try {
                 const method = (args[1] && args[1].method) || (urlArg instanceof Request ? urlArg.method : 'GET');
                 fetch('http://127.0.0.1:5102/debug/log', {
                     method: 'POST',
                     headers: {'Content-Type':'text/plain'},
-                    body: method + ' ' + urlString.substring(0, 400),
+                    body: 'fetch ' + method + ' ' + urlString.substring(0, 400),
                 }).catch(()=>{});
             } catch(e){}
         }
