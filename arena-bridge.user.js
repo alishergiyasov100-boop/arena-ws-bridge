@@ -959,32 +959,32 @@
         return null;
     }
 
-    let _navHook = null;
-    function installNavBlock() {
-        if (_navHook) return;
-        const ps = history.pushState.bind(history);
-        const rs = history.replaceState.bind(history);
-        _navHook = { ps, rs };
-        history.pushState = function(...args) {
-            if (window.__preventNavigation) {
-                console.log('[API Bridge] ⛔ blocked pushState', args[2]);
-                return;
-            }
-            return ps(...args);
-        };
-        history.replaceState = function(...args) {
-            if (window.__preventNavigation) {
-                console.log('[API Bridge] ⛔ blocked replaceState', args[2]);
-                return;
-            }
-            return rs(...args);
-        };
-        // beforeunload safety
-        window.addEventListener('beforeunload', (e) => {
-            if (window.__preventNavigation) { e.preventDefault(); return ''; }
-        });
+    // Install nav block lazily — only the FIRST time we synth-mint, so initial page load isn't affected.
+    let _navHookInstalled = false;
+    function ensureNavBlock() {
+        if (_navHookInstalled) return;
+        _navHookInstalled = true;
+        try {
+            const ps = history.pushState.bind(history);
+            const rs = history.replaceState.bind(history);
+            history.pushState = function(...args) {
+                if (window.__preventNavigation) {
+                    bridgePost('http://127.0.0.1:5102/debug/log', 'NAV pushState blocked '+(args[2]||''), 'text/plain');
+                    return;
+                }
+                return ps(...args);
+            };
+            history.replaceState = function(...args) {
+                if (window.__preventNavigation) {
+                    bridgePost('http://127.0.0.1:5102/debug/log', 'NAV replaceState blocked '+(args[2]||''), 'text/plain');
+                    return;
+                }
+                return rs(...args);
+            };
+        } catch(e) {
+            bridgePost('http://127.0.0.1:5102/debug/log', 'NAV hook err='+(e.message||e), 'text/plain');
+        }
     }
-    installNavBlock();
 
     async function mintRecaptchaViaSyntheticSend() {
         // Find chat input + Send button
@@ -1006,6 +1006,7 @@
         }
 
         // 1. Block navigation
+        ensureNavBlock();
         window.__preventNavigation = true;
         // 2. Block real /create-evaluation fetch
         window.__cancelNextCreateEval = true;
@@ -1262,27 +1263,12 @@
                             const scriptCount = document.querySelectorAll('script[src*="recaptcha"]').length;
                             try { if (!foundKey) foundKey = findRecaptchaSiteKey(); } catch(e){}
                             bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE rcap_diag gr='+hasGR+' cfg='+hasCfg+' scripts='+scriptCount+' site='+(foundKey||'NONE').substring(0,15)+' act='+(capturedAction||'NONE'), 'text/plain');
-                            // Ensure grecaptcha is actually loaded (arena lazy-loads it)
-                            if (foundKey) {
-                                const loaded = await ensureGrecaptchaLoaded(foundKey);
-                                bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE grecaptcha_loaded='+loaded, 'text/plain');
+                            // PRIMARY: synthetic Send (forces arena's own React to mint via real flow)
+                            bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE synth_mint start', 'text/plain');
+                            try { recaptchaV3 = await mintRecaptchaViaSyntheticSend(); } catch(e){
+                                bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE synth_mint err='+(e.message||e), 'text/plain');
                             }
-                            try { recaptchaV3 = await getFreshRecaptchaToken(); } catch(e){}
-                            bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE rcap_main len='+(recaptchaV3||'').length, 'text/plain');
-                            // Fallback 1: synthetic Send-button click (forces arena's own React to mint)
-                            if (!recaptchaV3) {
-                                bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE synth_mint start', 'text/plain');
-                                try { recaptchaV3 = await mintRecaptchaViaSyntheticSend(); } catch(e){
-                                    bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE synth_mint err='+(e.message||e), 'text/plain');
-                                }
-                                bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE synth_mint len='+(recaptchaV3||'').length, 'text/plain');
-                            }
-                            // Fallback 2: iframe-based mint
-                            if (!recaptchaV3 && foundKey) {
-                                bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE iframe_mint start', 'text/plain');
-                                try { recaptchaV3 = await mintRecaptchaViaIframe(foundKey, capturedAction || 'submit'); } catch(e){}
-                                bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE iframe_mint len='+(recaptchaV3||'').length, 'text/plain');
-                            }
+                            bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE synth_mint len='+(recaptchaV3||'').length, 'text/plain');
                             bridgePost('http://127.0.0.1:5102/debug/log', 'SPAWN_BATTLE rcap_final len='+(recaptchaV3||'').length+' first20='+(recaptchaV3||'').substring(0,20), 'text/plain');
                             // If captured token is fresh from real arena UI use, prefer it
                             if (!recaptchaV3 && window.recaptchaToken) {
