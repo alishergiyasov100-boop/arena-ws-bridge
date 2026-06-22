@@ -1008,14 +1008,18 @@
             _d('input_dispatched');
         } catch(e){ _d('setter_err='+(e.message||e).toString().substring(0,80)); }
 
-        // Get button coordinates immediately (no setTimeout)
+        // Get button coordinates with browser-chrome offset
         const r = btn.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
         const cssX = r.left + r.width / 2;
         const cssY = r.top + r.height / 2;
-        const physX = Math.round(cssX * dpr);
-        const physY = Math.round(cssY * dpr);
-        _d('tap rect=('+Math.round(r.left)+','+Math.round(r.top)+','+Math.round(r.width)+','+Math.round(r.height)+') phys=('+physX+','+physY+') dpr='+dpr);
+        // Browser chrome height = window.outerHeight - window.innerHeight (toolbar)
+        // Plus status bar height: window.screenY in CSS px (approximate)
+        const chromeY_css = (window.outerHeight - window.innerHeight) + (window.screenY || 0);
+        const physX = Math.round((cssX + (window.screenX || 0)) * dpr);
+        const physY = Math.round((cssY + chromeY_css) * dpr);
+        _d('tap css=('+Math.round(cssX)+','+Math.round(cssY)+') chrome=('+(window.screenX||0)+','+chromeY_css+') outer=('+window.outerWidth+','+window.outerHeight+') inner=('+window.innerWidth+','+window.innerHeight+') screen=('+screen.width+','+screen.height+') phys=('+physX+','+physY+') dpr='+dpr);
+        _d('btn disabled='+btn.disabled+' enabled='+!btn.disabled);
 
         // Block side effects
         ensureNavBlock();
