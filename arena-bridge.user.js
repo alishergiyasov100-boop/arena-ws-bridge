@@ -1113,9 +1113,10 @@
             return;
         }
 
+        _dbg('mkurl');
         const apiUrl = `/nextjs-api/stream/create-evaluation`;
         const evaluationId = uuidv7();
-        await new Promise(resolve => setTimeout(resolve, 45));
+        _dbg('mkurl_done');
 
         const newMessages = [];
         let lastMsgId = null;
