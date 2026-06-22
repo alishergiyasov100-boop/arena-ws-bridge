@@ -1090,9 +1090,12 @@
     // Request Handler
     // ============================================
     async function handleRequest(requestId, payload) {
+        const _dbg = (s) => bridgePost('http://127.0.0.1:5102/debug/log', 'HANDLE '+requestId.substring(0,8)+' '+s, 'text/plain');
+        _dbg('start');
         resetSessionTimer(); // Reset inactivity timer on new request
 
         const { message_templates, target_model_id, session_id, message_id } = payload;
+        _dbg('payload sid='+(session_id||'').substring(0,8)+' mid='+(message_id||'').substring(0,8)+' mt='+(message_templates||[]).length);
 
         if (!session_id || !message_id) {
             const errorMsg = "Session IDs missing. Please run setup again.";
@@ -1144,7 +1147,9 @@
         }
 
         console.log("[API Bridge] Getting fresh reCAPTCHA token...");
+        _dbg('before_token');
         const recaptchaToken = await getFreshRecaptchaToken();
+        _dbg('got_token len='+(recaptchaToken||'').length);
 
         if (!recaptchaToken) {
             console.error("[API Bridge] ❌ No reCAPTCHA token available!");
@@ -1182,6 +1187,7 @@
 
         window.isApiBridgeRequest = true;
         try {
+            _dbg('before_fetch');
             const response = await fetch(apiUrl, {
                 method: 'POST',
                 headers: {
@@ -1191,9 +1197,11 @@
                 body: JSON.stringify(body),
                 credentials: 'include'
             });
+            _dbg('fetch_status='+response.status);
 
             if (!response.ok || !response.body) {
                 const errorBody = await response.text();
+                _dbg('not_ok body='+errorBody.substring(0,150));
                 throw new Error(`Response error: ${response.status}. ${errorBody}`);
             }
 
